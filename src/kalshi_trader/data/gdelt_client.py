@@ -1,0 +1,127 @@
+from __future__ import annotations
+
+import logging
+from typing import Optional
+
+import pandas as pd
+
+from kalshi_trader.data.models import NewsArticle
+
+logger = logging.getLogger(__name__)
+
+
+class GDELTClient:
+    """Fetches news articles and timelines from the GDELT DOC 2.0 API."""
+
+    def __init__(self):
+        try:
+            from gdeltdoc import GdeltDoc
+
+            self._client = GdeltDoc()
+        except ImportError:
+            logger.warning("gdeltdoc not installed. Run: pip install gdeltdoc")
+            self._client = None
+
+    def search_articles(
+        self,
+        keywords: list[str],
+        start_date: str,
+        end_date: str,
+        max_records: int = 250,
+    ) -> list[NewsArticle]:
+        """
+        Search GDELT DOC 2.0 for articles matching keywords.
+
+        Args:
+            keywords: List of search terms (OR'd together).
+            start_date: Start date in YYYY-MM-DD format.
+            end_date: End date in YYYY-MM-DD format.
+            max_records: Max articles to return (GDELT caps at 250).
+
+        Returns:
+            List of NewsArticle dataclasses.
+        """
+        if self._client is None:
+            return []
+
+        from gdeltdoc import Filters
+
+        keyword_query = " OR ".join(f'"{kw}"' for kw in keywords)
+
+        try:
+            filters = Filters(
+                keyword=keyword_query,
+                start_date=start_date,
+                end_date=end_date,
+                num_records=min(max_records, 250),
+            )
+            df = self._client.article_search(filters)
+        except Exception as e:
+            logger.error("GDELT article search failed: %s", e)
+            return []
+
+        if df is None or df.empty:
+            return []
+
+        articles = []
+        for _, row in df.iterrows():
+            articles.append(
+                NewsArticle(
+                    url=row.get("url", ""),
+                    title=row.get("title", ""),
+                    seen_date=row.get("seendate", ""),
+                    domain=row.get("domain"),
+                    language=row.get("language"),
+                    source_country=row.get("sourcecountry"),
+                    tone=_parse_tone(row.get("tone")),
+                )
+            )
+        return articles
+
+    def get_timeline(
+        self,
+        keyword: str,
+        mode: str = "timelinevol",
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Get coverage volume or tone timeline for a keyword.
+
+        Args:
+            keyword: Search term.
+            mode: One of "timelinevol", "timelinevolraw", "timelinetone".
+            start_date: YYYY-MM-DD (optional).
+            end_date: YYYY-MM-DD (optional).
+
+        Returns:
+            DataFrame with (datetime, value) columns.
+        """
+        if self._client is None:
+            return pd.DataFrame()
+
+        from gdeltdoc import Filters
+
+        try:
+            filter_kwargs = {"keyword": keyword}
+            if start_date:
+                filter_kwargs["start_date"] = start_date
+            if end_date:
+                filter_kwargs["end_date"] = end_date
+            filters = Filters(**filter_kwargs)
+            df = self._client.timeline_search(mode, filters)
+        except Exception as e:
+            logger.error("GDELT timeline search failed for %r: %s", keyword, e)
+            return pd.DataFrame()
+
+        return df if df is not None else pd.DataFrame()
+
+
+def _parse_tone(value) -> Optional[float]:
+    """Parse GDELT tone value to float."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None

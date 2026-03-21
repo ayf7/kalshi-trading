@@ -1,0 +1,23 @@
+# Default configuration for kalshi-trader
+# Override with environment variables or .env file
+
+kalshi:
+  demo: true
+  base_url: "https://api.elections.kalshi.com/trade-api/v2"
+
+ingestion:
+  snapshot_interval_seconds: 30
+  tracked_series:
+    - "KXNBA"
+    - "KXNFL"
+  gdelt_poll_interval_seconds: 900  # 15 minutes
+
+risk:
+  max_position_per_market: 50
+  max_total_exposure_cents: 5000  # $50
+  max_drawdown_fraction: 0.20
+  max_open_orders: 20
+
+strategy:
+  min_edge: 0.05
+  default_order_size: 5

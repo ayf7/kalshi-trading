@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.env
+data/kalshi.db
+data/*.db
+*.pem
+*.pkl
+.ruff_cache/
+.pytest_cache/
+notebooks/.ipynb_checkpoints/
