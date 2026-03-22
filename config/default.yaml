@@ -8,8 +8,10 @@ kalshi:
 ingestion:
   snapshot_interval_seconds: 30
   tracked_series:
-    - "KXNBA"
-    - "KXNFL"
+    - "KXNBAGAME"
+    - "KXNBASPREAD"
+    - "KXNBATOTAL"
+    - "KXNBATEAMTOTAL"
   gdelt_poll_interval_seconds: 900  # 15 minutes
 
 risk:

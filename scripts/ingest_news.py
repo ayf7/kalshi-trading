@@ -81,26 +81,53 @@ def main():
 
 
 def _get_keywords_for_market(ticker: str, keyword_map: dict) -> list[str]:
-    """Extract GDELT search keywords for a market ticker."""
+    """Extract GDELT search keywords for a market ticker.
+
+    Matches ticker against keyword_map entries using prefix matching.
+    For example, KXNBAGAME-26MAR22BOSCLE-BOS will match the KXNBA entry
+    because the ticker starts with "KXNBA".
+
+    Team abbreviations are found by checking every known abbreviation
+    against the ticker string, since game-level tickers embed team codes
+    in various positions (e.g. KXNBAGAME-26MAR22BOSCLE-BOS).
+    """
     keywords = []
 
     for category, series_map in keyword_map.items():
         if not isinstance(series_map, dict):
             continue
+
         for series_prefix, series_config in series_map.items():
             if not ticker.startswith(series_prefix):
                 continue
-            if isinstance(series_config, dict):
-                # Check for direct keywords
-                if "keywords" in series_config:
-                    keywords.extend(series_config["keywords"])
-                # Check team map
-                if "team_map" in series_config:
-                    # Parse team abbreviations from ticker
-                    parts = ticker.replace(series_prefix + "-", "").split("-")
-                    for part in parts:
-                        if part in series_config["team_map"]:
-                            keywords.extend(series_config["team_map"][part])
+            if not isinstance(series_config, dict):
+                continue
+
+            if "keywords" in series_config:
+                keywords.extend(series_config["keywords"])
+
+            if "team_map" in series_config:
+                # Extract team abbreviations from the ticker.
+                # Tickers like KXNBAGAME-26MAR24SACCHA-SAC have team
+                # codes concatenated in the middle segment and as the
+                # last segment. Match longer abbreviations first to
+                # avoid "SA" matching inside "SAC".
+                remainder = ticker[len(series_prefix):]
+                sorted_abbrs = sorted(
+                    series_config["team_map"].keys(),
+                    key=lambda a: len(str(a)),
+                    reverse=True,
+                )
+                for abbr in sorted_abbrs:
+                    abbr_str = str(abbr)
+                    if abbr_str in remainder:
+                        keywords.extend(series_config["team_map"][abbr])
+                        # Remove matched abbreviation to prevent
+                        # shorter codes from matching its substring
+                        remainder = remainder.replace(abbr_str, "")
+
+            if keywords:
+                return keywords
 
     return keywords
 

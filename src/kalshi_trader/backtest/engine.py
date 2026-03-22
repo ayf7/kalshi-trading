@@ -33,6 +33,7 @@ class BacktestConfig:
     tickers: list[str] = field(default_factory=list)  # empty = all settled in range
     initial_balance_cents: int = 10000  # $100
     fee_per_contract_cents: int = 2
+    sample_interval: int = 1  # evaluate every N-th snapshot per market
 
 
 @dataclass
@@ -139,8 +140,22 @@ class BacktestEngine:
                 all_snapshots["ticker"] == ticker
             ].copy()
 
+        # Subsample snapshots if configured (keep every N-th per ticker)
+        if self.config.sample_interval > 1:
+            sampled_indices = []
+            for ticker in tickers_in_data:
+                ticker_idx = all_snapshots[all_snapshots["ticker"] == ticker].index
+                sampled_indices.extend(ticker_idx[:: self.config.sample_interval])
+            iter_snapshots = all_snapshots.loc[sampled_indices].sort_values("ts")
+            logger.info(
+                "Subsampled %d -> %d snapshots (interval=%d)",
+                len(all_snapshots), len(iter_snapshots), self.config.sample_interval,
+            )
+        else:
+            iter_snapshots = all_snapshots
+
         # Process snapshots chronologically
-        for _, snap_row in all_snapshots.iterrows():
+        for _, snap_row in iter_snapshots.iterrows():
             ticker = snap_row["ticker"]
             ts = int(snap_row["ts"])
 
@@ -227,7 +242,7 @@ class BacktestEngine:
                     action=signal.action,
                     price_cents=signal.price_cents,
                     quantity=signal.quantity,
-                    order_type=OrderType.GTC,
+                    order_type=OrderType.IOC,
                     status=OrderStatus.SUBMITTED,
                     source="backtest",
                     strategy_name=signal.strategy_name,

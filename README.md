@@ -87,6 +87,16 @@ Models are saved to `data/models/`.
 python scripts/run_backtest.py --start 2025-01-01 --end 2025-03-01 --model xgboost
 ```
 
+### Data Viewer
+
+Browse the SQLite database in your browser with [datasette](https://datasette.io/):
+
+```bash
+datasette data/kalshi.db -p 3000
+```
+
+Then open `http://localhost:3000` to explore tables, run SQL queries, and inspect ingested market data.
+
 ### Running Tests
 
 ```bash

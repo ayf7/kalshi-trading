@@ -49,21 +49,20 @@ class SignalStrategy(TradingStrategy):
             return []
 
         if edge > 0:
-            # Model thinks YES is underpriced -> buy YES
+            # Model thinks YES is underpriced -> buy YES at the ask (cross spread)
             side = Side.YES
             action = Action.BUY
-            # Place bid at 1 cent above current best bid
-            if snapshot.yes_bid is not None:
-                price = min(snapshot.yes_bid + 1, 99)
+            if snapshot.yes_ask is not None:
+                price = snapshot.yes_ask
             else:
                 price = int(model_prob * 100)
         else:
-            # Model thinks NO is underpriced -> buy NO
+            # Model thinks NO is underpriced -> buy NO at the ask (cross spread)
             side = Side.NO
             action = Action.BUY
-            # NO bid = 100 - YES ask
-            if snapshot.yes_ask is not None:
-                price = min((100 - snapshot.yes_ask) + 1, 99)
+            # NO ask = 100 - YES bid
+            if snapshot.yes_bid is not None:
+                price = 100 - snapshot.yes_bid
             else:
                 price = int((1 - model_prob) * 100)
 

@@ -13,7 +13,7 @@ class AppConfig(BaseSettings):
 
     # Ingestion
     snapshot_interval_seconds: int = 30
-    tracked_series: list[str] = ["KXNBA", "KXNFL"]
+    tracked_series: list[str] = ["KXNBAGAME", "KXNBASPREAD", "KXNBATOTAL", "KXNBATEAMTOTAL"]
     gdelt_poll_interval_seconds: int = 900  # 15 minutes
 
     # Risk limits

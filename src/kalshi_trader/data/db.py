@@ -317,8 +317,31 @@ def get_markets(
 def get_settled_markets(
     conn: sqlite3.Connection, category: str | None = None
 ) -> list[Market]:
-    """Get all settled markets."""
-    return get_markets(conn, status="settled", category=category)
+    """Get all settled/finalized markets with a result."""
+    query = "SELECT * FROM markets WHERE status IN ('settled', 'finalized') AND result IN ('yes', 'no')"
+    params: list = []
+    if category:
+        query += " AND category = ?"
+        params.append(category)
+    cursor = conn.execute(query, params)
+    rows = cursor.fetchall()
+    cols = [desc[0] for desc in cursor.description]
+    return [
+        Market(
+            ticker=row[cols.index("ticker")],
+            event_ticker=row[cols.index("event_ticker")],
+            title=row[cols.index("title")],
+            status=row[cols.index("status")],
+            series_ticker=row[cols.index("series_ticker")],
+            category=row[cols.index("category")],
+            result=row[cols.index("result")],
+            open_ts=row[cols.index("open_ts")],
+            close_ts=row[cols.index("close_ts")],
+            settled_ts=row[cols.index("settled_ts")],
+            rules_primary=row[cols.index("rules_primary")],
+        )
+        for row in rows
+    ]
 
 
 def get_news_for_ticker(

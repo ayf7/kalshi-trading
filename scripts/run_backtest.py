@@ -15,6 +15,12 @@ from kalshi_trader.features.market_features import (
     MarketPriceFeatures,
 )
 from kalshi_trader.models.logistic import LogisticBaseline
+from kalshi_trader.models.naive import (
+    ContrarianModel,
+    MarketImpliedModel,
+    MostLikelyModel,
+    RandomModel,
+)
 from kalshi_trader.models.xgboost_model import XGBoostModel
 from kalshi_trader.strategy.risk import RiskManager
 from kalshi_trader.strategy.signal import SignalStrategy
@@ -23,6 +29,10 @@ from kalshi_trader.strategy.signal import SignalStrategy
 MODELS = {
     "logistic": LogisticBaseline,
     "xgboost": XGBoostModel,
+    "random": RandomModel,
+    "most_likely": MostLikelyModel,
+    "contrarian": ContrarianModel,
+    "market_implied": MarketImpliedModel,
 }
 
 
@@ -49,6 +59,12 @@ def main():
     )
     parser.add_argument(
         "--min-edge", type=float, default=0.05, help="Minimum edge to trade"
+    )
+    parser.add_argument(
+        "--sample-interval",
+        type=int,
+        default=6,
+        help="Only evaluate every N-th snapshot per market (default: 6, ~every 6 hours)",
     )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
@@ -103,6 +119,7 @@ def main():
         end_date=args.end,
         tickers=args.tickers,
         initial_balance_cents=args.balance,
+        sample_interval=args.sample_interval,
     )
 
     # Run backtest

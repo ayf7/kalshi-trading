@@ -15,11 +15,14 @@ class XGBoostModel(ProbabilityModel):
 
     def __init__(
         self,
-        max_depth: int = 4,
-        n_estimators: int = 200,
+        max_depth: int = 3,
+        n_estimators: int = 150,
         learning_rate: float = 0.05,
         subsample: float = 0.8,
-        min_child_weight: int = 3,
+        min_child_weight: int = 5,
+        reg_alpha: float = 0.1,
+        reg_lambda: float = 2.0,
+        colsample_bytree: float = 0.8,
     ):
         self._params = {
             "max_depth": max_depth,
@@ -27,6 +30,9 @@ class XGBoostModel(ProbabilityModel):
             "learning_rate": learning_rate,
             "subsample": subsample,
             "min_child_weight": min_child_weight,
+            "reg_alpha": reg_alpha,
+            "reg_lambda": reg_lambda,
+            "colsample_bytree": colsample_bytree,
         }
         self._model = XGBClassifier(
             objective="binary:logistic",

@@ -82,27 +82,45 @@ class KalshiClient:
     ) -> list[Market]:
         """Fetch markets, optionally filtered by series and status."""
         self._ensure_client()
-        self._read_limiter.wait()
 
-        try:
-            kwargs = {"limit": limit}
-            if status:
-                kwargs["status"] = status
-            response = self._markets_api.get_markets(**kwargs)
-        except Exception as e:
-            logger.error("Error fetching markets: %s", e)
-            return []
+        all_markets_data = []
+        series_list = series or [None]
 
-        # Response is a Pydantic model -- access .markets attribute
-        markets_data = _get_attr_or_key(response, "markets", [])
+        for series_ticker in series_list:
+            cursor = None
+            while True:
+                self._read_limiter.wait()
+                try:
+                    kwargs = {"limit": limit}
+                    if status:
+                        kwargs["status"] = status
+                    if series_ticker:
+                        kwargs["series_ticker"] = series_ticker
+                    if cursor:
+                        kwargs["cursor"] = cursor
+                    response = self._markets_api.get_markets(**kwargs)
+                except Exception as e:
+                    logger.error("Error fetching markets: %s", e)
+                    break
+
+                markets_data = _get_attr_or_key(response, "markets", [])
+                if not markets_data:
+                    break
+                all_markets_data.extend(markets_data)
+
+                cursor = _get_attr_or_key(response, "cursor", None)
+                if not cursor:
+                    break
 
         markets = []
-        for m in markets_data:
+        for m in all_markets_data:
             ticker = _get_attr_or_key(m, "ticker", "")
-            series_ticker = _get_attr_or_key(m, "series_ticker", "")
 
-            if series and not any(ticker.startswith(s) or series_ticker == s for s in series):
-                continue
+            # Derive series_ticker from the ticker prefix if the API
+            # doesn't return it (common for game-level markets)
+            st = _get_attr_or_key(m, "series_ticker")
+            if not st and ticker:
+                st = ticker.split("-")[0]
 
             markets.append(
                 Market(
@@ -110,40 +128,56 @@ class KalshiClient:
                     event_ticker=_get_attr_or_key(m, "event_ticker", ""),
                     title=_get_attr_or_key(m, "title", ""),
                     status=_get_attr_or_key(m, "status", ""),
-                    series_ticker=series_ticker,
+                    series_ticker=st,
                     category=_get_attr_or_key(m, "category", ""),
                     result=_get_attr_or_key(m, "result"),
                     open_ts=_to_epoch(_get_attr_or_key(m, "open_time")),
                     close_ts=_to_epoch(_get_attr_or_key(m, "close_time")),
-                    settled_ts=_to_epoch(_get_attr_or_key(m, "settlement_time")),
+                    settled_ts=_to_epoch(
+                        _get_attr_or_key(m, "expiration_time")
+                        or _get_attr_or_key(m, "settlement_time")
+                    ),
                     rules_primary=_get_attr_or_key(m, "rules_primary"),
                 )
             )
         return markets
 
     def get_snapshot(self, ticker: str) -> MarketSnapshot:
-        """Fetch a BBO snapshot for a single market."""
+        """Fetch a BBO snapshot for a single market.
+
+        Uses a raw HTTP request instead of the SDK because the API
+        returns price fields as *_dollars strings and quantity fields
+        as *_fp floats, which the SDK does not deserialize.
+        """
         self._ensure_client()
         self._read_limiter.wait()
 
         try:
-            response = self._markets_api.get_market(ticker)
+            url = f"{self.config.kalshi_base_url}/markets/{ticker}"
+            if self.config.kalshi_demo:
+                url = url.replace("api.elections.kalshi.com", "demo-api.kalshi.co")
+            headers = {}
+            self._api_client.update_params_for_auth(
+                headers, {}, ["bearer"], None, None, None
+            )
+            import requests
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.raise_for_status()
+            m = resp.json().get("market", {})
         except Exception as e:
             logger.error("Error fetching market %s: %s", ticker, e)
             return MarketSnapshot(ticker=ticker, ts=int(time.time()))
 
-        m = _get_attr_or_key(response, "market", response)
-
         return MarketSnapshot(
             ticker=ticker,
             ts=int(time.time()),
-            yes_bid=_cents(_get_attr_or_key(m, "yes_bid")),
-            yes_ask=_cents(_get_attr_or_key(m, "yes_ask")),
-            last_price=_cents(_get_attr_or_key(m, "last_price")),
-            volume=_get_attr_or_key(m, "volume"),
-            open_interest=_get_attr_or_key(m, "open_interest"),
-            yes_bid_size=_get_attr_or_key(m, "yes_bid_size"),
-            yes_ask_size=_get_attr_or_key(m, "yes_ask_size"),
+            yes_bid=_dollars_or_cents(m, "yes_bid"),
+            yes_ask=_dollars_or_cents(m, "yes_ask"),
+            last_price=_dollars_or_cents(m, "last_price"),
+            volume=_get_fp_or_int(m, "volume"),
+            open_interest=_get_fp_or_int(m, "open_interest"),
+            yes_bid_size=_get_fp_or_int(m, "yes_bid_size"),
+            yes_ask_size=_get_fp_or_int(m, "yes_ask_size"),
         )
 
     def get_orderbook(self, ticker: str) -> OrderBook:
@@ -225,10 +259,14 @@ def _to_epoch(ts_val) -> Optional[int]:
     # Already an int/float (epoch)
     if isinstance(ts_val, (int, float)):
         return int(ts_val)
+    # datetime object (kalshi-python SDK returns these)
+    from datetime import datetime
+    if isinstance(ts_val, datetime):
+        return int(ts_val.timestamp())
     # ISO string
     if isinstance(ts_val, str):
         try:
-            from datetime import datetime, timezone
+            from datetime import timezone
             dt = datetime.fromisoformat(ts_val.replace("Z", "+00:00"))
             return int(dt.timestamp())
         except (ValueError, AttributeError):
@@ -244,4 +282,37 @@ def _cents(value) -> Optional[int]:
         if isinstance(value, float) and value < 1.0:
             return int(round(value * 100))
         return int(value)
+    if isinstance(value, str):
+        try:
+            f = float(value)
+            return int(round(f * 100)) if f <= 1.0 else int(f)
+        except ValueError:
+            return None
+    return None
+
+
+def _dollars_or_cents(obj, field_name: str) -> Optional[int]:
+    """Read a price field, trying the _dollars variant first (returns dollar
+    strings like '0.7200'), then falling back to the plain field name."""
+    val = _get_attr_or_key(obj, f"{field_name}_dollars")
+    if val is not None:
+        return _cents(val)
+    return _cents(_get_attr_or_key(obj, field_name))
+
+
+def _get_fp_or_int(obj, field_name: str) -> Optional[int]:
+    """Read a quantity field, trying the _fp variant first (returns float
+    strings like '3331473.00'), then falling back to the plain field name."""
+    val = _get_attr_or_key(obj, f"{field_name}_fp")
+    if val is not None:
+        try:
+            return int(float(val))
+        except (ValueError, TypeError):
+            pass
+    val = _get_attr_or_key(obj, field_name)
+    if val is not None:
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            pass
     return None
