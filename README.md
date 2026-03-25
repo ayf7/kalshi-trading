@@ -36,12 +36,12 @@ Edit `.env` with your Kalshi API credentials:
 ```
 KALSHI_API_KEY_ID=your-api-key-id-here
 KALSHI_PRIVATE_KEY_PATH=/path/to/your/private_key.pem
-KALSHI_DEMO=true
+KALSHI_DEMO=false
 DB_PATH=data/kalshi.db
 ```
 
 - Get your API key ID and RSA private key from [Kalshi Account Settings](https://kalshi.com/account/profile).
-- Set `KALSHI_DEMO=true` to use Kalshi's demo environment (`demo-api.kalshi.co`) instead of production.
+- Set `KALSHI_DEMO=true` to use Kalshi's demo environment (`demo-api.kalshi.co`) — note that demo has limited markets (no NBA/NFL).
 - If you only plan to use synthetic data, you can skip this step entirely.
 
 ## Quick Start (No API credentials needed)
@@ -63,20 +63,38 @@ python scripts/run_backtest.py --start 2025-01-15 --end 2025-02-10 --model logis
 
 ```bash
 # Snapshot market prices once
-python scripts/ingest_snapshot.py --once
+python scripts/ingest_snapshot.py --once -v
 
 # Run continuously (every 30s)
 python scripts/ingest_snapshot.py
 
+# Override tracked series
+python scripts/ingest_snapshot.py --once --series KXNBAGAME KXNBASPREAD
+
 # Fetch news articles
+python scripts/ingest_news.py -v
 python scripts/ingest_news.py --keywords "Celtics" "Lakers"
 ```
+
+### Historical Backfill
+
+Fetch historical candlestick data for settled markets:
+
+```bash
+# Backfill NBA game markets (uses each market's actual time window)
+python scripts/backfill_history.py --series KXNBAGAME -v
+
+# Backfill with custom settings
+python scripts/backfill_history.py --series KXNBAGAME KXNBASPREAD --period 60 -v
+```
+
+The script is resumable — re-running skips markets already in the DB.
 
 ### Model Training
 
 ```bash
-python scripts/train_model.py --model logistic      # Logistic regression
-python scripts/train_model.py --model xgboost        # XGBoost
+python scripts/train_model.py --model logistic -v    # Logistic regression
+python scripts/train_model.py --model xgboost -v     # XGBoost
 ```
 
 Models are saved to `data/models/`.
@@ -84,7 +102,14 @@ Models are saved to `data/models/`.
 ### Backtesting
 
 ```bash
-python scripts/run_backtest.py --start 2025-01-01 --end 2025-03-01 --model xgboost
+# Run with a pre-trained model
+python scripts/run_backtest.py --start 2025-12-01 --end 2026-03-22 --model logistic --model-path data/models/logistic.pkl
+
+# Available models: logistic, xgboost, random, most_likely, contrarian, market_implied
+python scripts/run_backtest.py --start 2025-12-01 --end 2026-03-22 --model market_implied
+
+# Adjust minimum edge threshold and subsample interval
+python scripts/run_backtest.py --start 2025-12-01 --end 2026-03-22 --model logistic --model-path data/models/logistic.pkl --min-edge 0.03 --sample-interval 10
 ```
 
 ### Data Viewer
@@ -114,8 +139,12 @@ kalshi-trader/
 │   ├── models/              # ML models (logistic regression, XGBoost)
 │   ├── strategy/            # Trading strategy + risk management
 │   └── backtest/            # Backtesting engine + simulated exchange
-├── scripts/                 # CLI entry points
+│   ├── models/naive.py      # Naive baselines (random, contrarian, market-implied)
+├── scripts/                 # CLI entry points (ingest, backfill, train, backtest)
 ├── config/                  # Default settings + keyword mappings
 ├── tests/                   # pytest tests
-└── data/                    # SQLite database (gitignored)
+├── data/                    # SQLite database (gitignored)
+└── docs/
+    ├── experiments/         # Experiment results and analysis
+    └── TICKERS.md           # Available Kalshi market series
 ```

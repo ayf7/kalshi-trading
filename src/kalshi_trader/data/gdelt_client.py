@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 class GDELTClient:
     """Fetches news articles and timelines from the GDELT DOC 2.0 API."""
 
-    def __init__(self):
+    def __init__(self, request_delay: float = 5.0):
+        self._request_delay = request_delay
         try:
             from gdeltdoc import GdeltDoc
 
@@ -46,37 +47,48 @@ class GDELTClient:
 
         from gdeltdoc import Filters
 
-        keyword_query = " OR ".join(f'"{kw}"' for kw in keywords)
-
-        try:
-            filters = Filters(
-                keyword=keyword_query,
-                start_date=start_date,
-                end_date=end_date,
-                num_records=min(max_records, 250),
-            )
-            df = self._client.article_search(filters)
-        except Exception as e:
-            logger.error("GDELT article search failed: %s", e)
+        # Filter to multi-word keywords only — GDELT rejects short/common
+        # single words like "Nets", "Heat", "Jazz"
+        multi_word = [kw for kw in keywords if len(kw.split()) >= 2]
+        if not multi_word:
             return []
 
-        if df is None or df.empty:
-            return []
+        # gdeltdoc wraps the keyword param in quotes automatically, so we
+        # can't use OR syntax. Search each keyword separately and merge.
+        import time
+        all_articles = {}  # url -> NewsArticle (dedup by URL)
 
-        articles = []
-        for _, row in df.iterrows():
-            articles.append(
-                NewsArticle(
-                    url=row.get("url", ""),
-                    title=row.get("title", ""),
-                    seen_date=row.get("seendate", ""),
-                    domain=row.get("domain"),
-                    language=row.get("language"),
-                    source_country=row.get("sourcecountry"),
-                    tone=_parse_tone(row.get("tone")),
+        for kw in multi_word:
+            time.sleep(self._request_delay)
+            try:
+                filters = Filters(
+                    keyword=kw,
+                    start_date=start_date,
+                    end_date=end_date,
+                    num_records=min(max_records, 250),
                 )
-            )
-        return articles
+                df = self._client.article_search(filters)
+            except Exception as e:
+                logger.error("GDELT article search failed for %r: %s", kw, e)
+                continue
+
+            if df is None or df.empty:
+                continue
+
+            for _, row in df.iterrows():
+                url = row.get("url", "")
+                if url and url not in all_articles:
+                    all_articles[url] = NewsArticle(
+                        url=url,
+                        title=row.get("title", ""),
+                        seen_date=row.get("seendate", ""),
+                        domain=row.get("domain"),
+                        language=row.get("language"),
+                        source_country=row.get("sourcecountry"),
+                        tone=_parse_tone(row.get("tone")),
+                    )
+
+        return list(all_articles.values())
 
     def get_timeline(
         self,

@@ -16,6 +16,10 @@ class AppConfig(BaseSettings):
     tracked_series: list[str] = ["KXNBAGAME", "KXNBASPREAD", "KXNBATOTAL", "KXNBATEAMTOTAL"]
     gdelt_poll_interval_seconds: int = 900  # 15 minutes
 
+    # Google BigQuery (for GDELT data without rate limits)
+    gcp_project: str = ""
+    gcp_credentials_path: str = ""  # path to service-account JSON key
+
     # Risk limits
     max_position_per_market: int = 50
     max_total_exposure_cents: int = 5000  # $50

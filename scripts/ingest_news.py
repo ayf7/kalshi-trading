@@ -26,6 +26,12 @@ def main():
         default=1,
         help="Number of days to look back (default: 1)",
     )
+    parser.add_argument(
+        "--source",
+        choices=["bigquery", "gdelt"],
+        default="bigquery",
+        help="News data source: 'bigquery' (default, no rate limits) or 'gdelt' (DOC 2.0 API)",
+    )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -37,7 +43,18 @@ def main():
 
     config = AppConfig()
     conn = db.init_db(config.db_path)
-    gdelt = GDELTClient()
+
+    if args.source == "bigquery":
+        from kalshi_trader.data.bigquery_client import BigQueryGDELTClient
+
+        gdelt = BigQueryGDELTClient(
+            project=config.gcp_project or None,
+            credentials_path=config.gcp_credentials_path or None,
+        )
+        logger.info("Using BigQuery GDELT source")
+    else:
+        gdelt = GDELTClient()
+        logger.info("Using GDELT DOC 2.0 API source")
 
     end_date = datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.now() - timedelta(days=args.days_back)).strftime("%Y-%m-%d")
@@ -58,12 +75,28 @@ def main():
             conn.close()
             return
 
-        # Get open markets
-        markets = db.get_markets(conn, status="open")
-        logger.info("Found %d open markets", len(markets))
+        # Get active and finalized markets
+        markets = db.get_markets(conn, status="active")
+        markets += db.get_markets(conn, status="finalized")
+        logger.info("Found %d markets", len(markets))
+
+        # Deduplicate by event_ticker — same game has 2 contracts (one per team)
+        # but we only need to search news once per game
+        seen_events = set()
+        unique_markets = []
+        for market in markets:
+            if market.event_ticker not in seen_events:
+                seen_events.add(market.event_ticker)
+                unique_markets.append(market)
+        logger.info("Unique games/events: %d", len(unique_markets))
 
         total_articles = 0
+        # Find all tickers for each event (to link articles to both sides)
+        event_tickers = {}
         for market in markets:
+            event_tickers.setdefault(market.event_ticker, []).append(market.ticker)
+
+        for i, market in enumerate(unique_markets):
             keywords = _get_keywords_for_market(market.ticker, keyword_map)
             if not keywords:
                 continue
@@ -72,8 +105,13 @@ def main():
             for article in articles:
                 article_id = db.insert_news_article(conn, article)
                 if article_id is not None:
-                    db.link_news_to_market(conn, article_id, market.ticker)
+                    # Link to all tickers for this event (both sides of the game)
+                    for ticker in event_tickers.get(market.event_ticker, [market.ticker]):
+                        db.link_news_to_market(conn, article_id, ticker)
                     total_articles += 1
+
+            if (i + 1) % 20 == 0:
+                logger.info("Progress: %d/%d events, %d articles", i + 1, len(unique_markets), total_articles)
 
         logger.info("Ingested %d new articles total", total_articles)
 
