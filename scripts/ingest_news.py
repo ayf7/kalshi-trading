@@ -80,38 +80,39 @@ def main():
         markets += db.get_markets(conn, status="finalized")
         logger.info("Found %d markets", len(markets))
 
-        # Deduplicate by event_ticker — same game has 2 contracts (one per team)
-        # but we only need to search news once per game
-        seen_events = set()
-        unique_markets = []
+        # Build mapping: keyword_key (frozenset) -> list of tickers to link
+        # This deduplicates queries — "Boston Celtics" only gets queried once
+        # even if the Celtics played 80 games.
+        keyword_to_tickers: dict[frozenset[str], list[str]] = {}
         for market in markets:
-            if market.event_ticker not in seen_events:
-                seen_events.add(market.event_ticker)
-                unique_markets.append(market)
-        logger.info("Unique games/events: %d", len(unique_markets))
-
-        total_articles = 0
-        # Find all tickers for each event (to link articles to both sides)
-        event_tickers = {}
-        for market in markets:
-            event_tickers.setdefault(market.event_ticker, []).append(market.ticker)
-
-        for i, market in enumerate(unique_markets):
             keywords = _get_keywords_for_market(market.ticker, keyword_map)
             if not keywords:
                 continue
+            key = frozenset(keywords)
+            keyword_to_tickers.setdefault(key, []).append(market.ticker)
 
-            articles = gdelt.search_articles(keywords, start_date, end_date)
+        unique_keyword_sets = list(keyword_to_tickers.items())
+        logger.info(
+            "Deduplicated %d markets into %d unique keyword sets",
+            len(markets),
+            len(unique_keyword_sets),
+        )
+
+        total_articles = 0
+        for i, (kw_key, tickers) in enumerate(unique_keyword_sets):
+            articles = gdelt.search_articles(list(kw_key), start_date, end_date)
             for article in articles:
                 article_id = db.insert_news_article(conn, article)
                 if article_id is not None:
-                    # Link to all tickers for this event (both sides of the game)
-                    for ticker in event_tickers.get(market.event_ticker, [market.ticker]):
+                    for ticker in tickers:
                         db.link_news_to_market(conn, article_id, ticker)
                     total_articles += 1
 
-            if (i + 1) % 20 == 0:
-                logger.info("Progress: %d/%d events, %d articles", i + 1, len(unique_markets), total_articles)
+            if (i + 1) % 10 == 0:
+                logger.info(
+                    "Progress: %d/%d keyword sets, %d articles",
+                    i + 1, len(unique_keyword_sets), total_articles,
+                )
 
         logger.info("Ingested %d new articles total", total_articles)
 
