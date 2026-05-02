@@ -11,3 +11,5 @@ data/*.db
 .ruff_cache/
 .pytest_cache/
 notebooks/.ipynb_checkpoints/
+docs/
+data/
